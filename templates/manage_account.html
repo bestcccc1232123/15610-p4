@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %} - Home{% endblock %}
+{% block content %}
+
+<div class="row-fluid">
+
+  <div class="span6">
+    <center><h2> Add Group </h2></center>
+
+
+    <form class="form-horizontal" action="{{ url_for('add_group') }}"
+          method="post">
+
+      <div class="control-group">
+        <label class="control-label" for="groupname">Group Name</label>
+        <div class="controls">
+          <input type="text" id="groupname" name="group_name" 
+                 placeholder="group1">
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label class="control-label" for="groupncomment">Comment</label>
+        <div class="controls">
+          <input type="text" id="groupcomment" name="group_comment" 
+                 placeholder="Add comment here">
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <div class="controls">
+          <button type="submit" class="btn">Add</button>
+        </div>
+      </div>
+
+    </form>
+
+  </div>
+  
+  <div class="span6">
+    <center><h2> Add User </h2><center/>
+    <form class="form-horizontal" action="{{ url_for('add_user') }}"
+          method="post">
+      <div class="control-group">
+        <label class="control-label" for="username">Username</label>
+        <div class="controls">
+          <input type="text" id="username" name="user_name"
+                 placeholder="Alice">
+        </div>
+      </div>
+      <div class="control-group">
+        <label class="control-label" for="password">Password</label>
+        <div class="controls">
+          <input type="password" id="password" name="user_pwd"
+                 placeholder="Password">
+        </div>
+      </div>
+      <div class="control-group">
+        <label class="control-label" for="groupname">Group Name</label>
+        <div class="controls">
+          <input type="text" id="groupname" name="group_name" 
+                 placeholder="group1">
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <div class="controls">
+          <button type="submit" class="btn">Add</button>
+        </div>
+      </div>
+    </form>
+
+  </div>
+
+
+</div> <!-- end of a row -->
+
+
+<div class="row-fluid">
+  
+  <div class="span6">
+    <center><h2> Groups </h2></center>
+    <table class="table">
+      <tr>
+        <th> Group Id </th>
+        <th> Group Name </th>
+        <th> Group Comment </th>
+      </tr>
+      {% for group in groups %}
+      <tr>
+        <td> {{ group['id'] }} </td>
+        <td> {{ group['group_name'] }} </td>
+        <td> {{ group['group_comment'] }} </td>
+      </tr>
+      {% endfor %}
+      
+    </table>
+  </div>
+
+  <div class="span6">
+    <center><h2>Users</h2></center>
+
+    <table class="table">
+      <tr>
+        <th> User Id </th>
+        <th> User Name </th>
+        <th> User Group Id </th>
+      </tr>
+      {% for user in users %}
+      <tr>
+        <td> {{ user['id'] }} </td>
+        <td> {{ user['user_name'] }} </td>
+        <td> {{ user['gid'] }} </td>
+      </tr>
+      {% endfor %}      
+    </table>
+
+
+  </div>
+<div> <!-- end of a row -->
+
+{% endblock %}

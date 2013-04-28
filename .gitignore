@@ -1,5 +1,14 @@
 *.py[cod]
 
+#for temporary files
+*~
+
+# for image
+*.jpg
+*.jpeg
+*.gif
+
+
 # C extensions
 *.so
 

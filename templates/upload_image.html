@@ -1,0 +1,19 @@
+{% extends "layout.html" %}
+{% block body %}
+  <h2>Upload_Image</h2>
+  {% if error %}<p class=error><strong>Error:</strong> {{ error }}{% endif %}
+
+    <form action="{{ url_for('upload_file') }}" method=post 
+          enctype=multipart/form-data>
+      <dl>
+        <dt> User Name:
+          <dd><input type=text name=user_name>
+        <dt> Upload Image:
+          <dd><input type=file name=file>            
+          <dd><input type=submit value=Upload>
+    </form>  
+
+{% endblock %}
+
+
+
