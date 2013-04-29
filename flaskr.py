@@ -366,7 +366,7 @@ def upload_file():
         return redirect('/')
     else:    
         if request.method == 'POST':            
-            
+
             #find the user
             db = get_db()
             cur = db.execute('select id,gid from user_p4 where user_name=?', 
@@ -375,7 +375,7 @@ def upload_file():
             
             if (len(users) == 1):
                 user = users[0]            
-                
+
                 # check and save the file into temporary private database
                 file = request.files['file']
                 if file and allowed_file(file.filename):
@@ -394,7 +394,7 @@ def upload_file():
                     # reset the commit history
                     c = get_commit_group(session['gid'])
                     c.add_new_image()
-
+                    print "reach here !!"                
                 return redirect(url_for('user_page'))
 
 
@@ -408,6 +408,7 @@ def user_page():
         print "session gid:" + str(session['gid'])
         images = get_private_images_for_group(session['gid'])
         
+        print str(os.urandom(24))
         return render_template('user_page.html', images = images)
     
 
