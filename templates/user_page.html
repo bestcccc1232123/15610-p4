@@ -10,43 +10,74 @@
 
 
 <div class="row-fluid">
+
+  <div class="span6">
+
+    <form action="{{ url_for('upload_file') }}" method="post" 
+          enctype=multipart/form-data>
+      <div class="fileupload fileupload-new" data-provides="fileupload">
+        <div class="fileupload-preview thumbnail" 
+             style="width: 200px; height: 150px;"></div>
+        <div>
+          <span class="btn btn-file">
+            <span class="fileupload-new">Select image</span>
+            <span class="fileupload-exists">Change</span>
+            <input type="file" name="file" /></span>
+          <a href="#" class="btn fileupload-exists" 
+             data-dismiss="fileupload">Remove</a>
+        </div>
+      </div>
+      <input type=submit value=Upload>
+    </form>
+  </div>
+
+  <div class="span6">
+    <h2> Please confirm the group images </h2>
+    <form class="form-horizontal" action="{{ url_for('user_agree') }}"
+          method="post">      
+      <div class="control-group">
+        <div class="controls">
+          <button type="submit" class="btn">Agree</button>
+        </div>
+      </div>
+    </form>
+    <form class="form-horizontal" action="{{ url_for('user_refuse') }}"
+          method="post">      
+      <div class="control-group">
+        <div class="controls">
+          <button type="submit" class="btn">Refuse</button>
+        </div>
+      </div>
+    </form>
+    
+  </div>
+
+
+</div> <!-- end of a row -->
+
+<div class="row-fluid">
   <div class = "span">
     <h2> Unconfirmed Group Image </h2>
   </div>
-</div>
+</div> <!-- end of a row -->
 
-<div class="row">
-  <div class="span2">
-    <a href="../static/img/einstein.jpg">
-      <img src="../static/img/einstein.jpg" class="img-rounded">
-    </a>
-  </div>
-  <div class="span2">
-    <a href="../static/img/dirac.jpg">
-      <img src="../static/img/dirac.jpg" class="img-rounded">
-    </a>
-  </div>
-  <div class="span2">
-    <a href="../static/img/curie.jpg">
-      <img src="../static/img/curie.jpg" class="img-rounded">
-    </a>
-  </div>
-  <div class="span2">
-    <a href="../static/img/Euler.jpg">
-      <img src="../static/img/Euler.jpg" class="img-rounded">
-    </a>
-  </div>
-  <div class="span2">
-    <a href="../static/img/gauss.jpeg">
-      <img src="../static/img/gauss.jpeg" class="img-rounded">
-    </a>
-  </div>
-  <div class="span2">
-    <a href="../static/img/newton.jpeg">
-      <img src="../static/img/newton.jpeg" class="img-rounded">
-    </a>
-  </div>
 
-</div>
+
+<!-- display unconfirmed images as a gallery -->
+  {% for images_six in images|batch(6) %}
+  <div class="row-fluid">
+    {% for image in images_six %}
+    <div class="span2">      
+      <a href="../{{ image.image_path }}">
+        <img src="../{{ image.image_path }}" class="img-rounded">
+      </a>
+    </div>
+    {% endfor %}
+  </div> <!-- end of a row -->
+
+  {% endfor %}
+    
+
+
 
 {% endblock %}

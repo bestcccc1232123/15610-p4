@@ -9,45 +9,31 @@
 </div>
 
 
+
+
+{% for group in groups %}
 <div class="row-fluid">
   <div class = "span">
-    <h2> Group 1 </h2>
+    <h2> {{ group['group_name'] }} </h2>
   </div>
 </div>
 
-
-<div class="row">
+{% set group_name = group['group_name'] %}
+{% for images_six in imagesList[group_name] | batch(6) %}
+<div class="row-fluid">
+  {% for image in images_six %}
   <div class="span2">
-    <a href="../static/img/einstein.jpg">
-      <img src="../static/img/einstein.jpg" class="img-rounded">
+    <a href="../{{ image.image_path }}">
+      <img src="../{{ image.image_path }}" class="img-rounded">
     </a>
   </div>
-  <div class="span2">
-    <a href="../static/img/dirac.jpg">
-      <img src="../static/img/dirac.jpg" class="img-rounded">
-    </a>
-  </div>
-  <div class="span2">
-    <a href="../static/img/curie.jpg">
-      <img src="../static/img/curie.jpg" class="img-rounded">
-    </a>
-  </div>
-  <div class="span2">
-    <a href="../static/img/Euler.jpg">
-      <img src="../static/img/Euler.jpg" class="img-rounded">
-    </a>
-  </div>
-  <div class="span2">
-    <a href="../static/img/gauss.jpeg">
-      <img src="../static/img/gauss.jpeg" class="img-rounded">
-    </a>
-  </div>
-  <div class="span2">
-    <a href="../static/img/newton.jpeg">
-      <img src="../static/img/newton.jpeg" class="img-rounded">
-    </a>
-  </div>
-
+  {% endfor %}
 </div>
+{% endfor %}
+
+{% endfor %}
+
+
+
 
 {% endblock %}
