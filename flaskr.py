@@ -561,4 +561,4 @@ if __name__ == '__main__':
     #init db once
     #init_db()
     #    init_commit_history()
-    app.run()
+    app.run(host='0.0.0.0')
