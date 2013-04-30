@@ -31,7 +31,7 @@ PASSWORD = 'default'
 LEN_RAND_ID = 32
 
 
-VOTE_INTERVAL = 600
+VOTE_INTERVAL = 3
 PATH_IMAGE = 'static/img/'
 ALLOWED_EXTENSIONS = set(['txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'])
 
@@ -291,13 +291,7 @@ def save_commit_image_for_event(db, eid):
     
 
 class Event_g:
-    eid = None
-    event_name = None
-    uncommit_images = []               # list of uncommitted images
-    commit_images = []                 # list of committed images
-    users = []                # list of uid
-    vote_states = []
-    
+
     def __init__(self,event_name):
         self.event_name = event_name
         self.uncommit_images = []
@@ -305,7 +299,9 @@ class Event_g:
         self.users = []
         self.vote_states = []
         self.eid = get_random_id()
-    
+        self.info = None
+        self.time_start = -1
+
     def clear_vote_state(self):
         for vote in self.vote_states:
             vote['accept'] = 0
@@ -342,6 +338,8 @@ class Event_g:
         db = get_db()
         save_new_uncommit_image(db, self.eid, uid, image_name, image_path)
         db.commit()
+        
+        self.reset_timer()
 
     def _commit_images(self, db):
         self.commit_images = self.commit_images + self.uncommit_images
@@ -350,33 +348,59 @@ class Event_g:
 
         
     def agree(self, uid):
-        for vote in self.vote_states:
-            if vote['uid'] == uid:
-                print "find vote"
-                vote['accept'] = 1
-                if self.all_accept():
-                    print "all users have accepted"
-                    self.clear_vote_state()
-                    db = get_db()
-                    self._commit_images(db)
-                    save_vote_state(db, self.eid, self.vote_states)
-                    db.commit()
-                else:
-                    db = get_db()
-                    update_vote_state(db, self.eid, uid, 1)
-                    db.commit()
+        if not self.does_timeout():
+            for vote in self.vote_states:
+                if vote['uid'] == uid:
+                    print "find vote"
+                    vote['accept'] = 1
+                    if self.all_accept():
+                        print "all users have accepted"
+                        self.clear_vote_state()
+                        db = get_db()
+                        self._commit_images(db)
+                        save_vote_state(db, self.eid, self.vote_states)
+                        db.commit()
+                        self.stop_timer()
+                        self.info = 'Photos have been successfully committed'
+                    else:
+                        db = get_db()
+                        update_vote_state(db, self.eid, uid, 1)
+                        db.commit()
                 break
-        #else:
-        #   raise exception no such user
+            #else:
+            #   raise exception no such user
         
     def refuse(self, uid):
-        self.clear_vote_state()
-        self.uncommit_images = []
-        db = get_db()
-        save_vote_state(db, self.eid, self.vote_states)
-        delete_uncommit_images_for_event(db, self.eid)
-        db.commit()
+        if not self.does_timeout():
+            self.clear_vote_state()
+            self.uncommit_images = []
+            db = get_db()
+            save_vote_state(db, self.eid, self.vote_states)
+            delete_uncommit_images_for_event(db, self.eid)
+            db.commit()
+            self.stop_timer()
+            self.info = 'One of the users refuse to commit the photos, abort'
+            
+            
+    def does_timeout(self):
+        time_now = time.time()
+        if self.time_start > 0 and time_now - self.time_start  > VOTE_INTERVAL:
+            self.info = 'Timeout, abort'
+            self.clear_vote_state()
+            self.uncommit_images = []
+            db = get_db()
+            save_vote_state(db, self.eid, self.vote_states)
+            delete_uncommit_images_for_event(db, self.eid)
+            db.commit()
+            return True
+        else:
+            return False
+    
+    def reset_timer(self):
+        self.time_start = time.time()
 
+    def stop_timer(self):
+        self.time_start = -1 # time_start < 0 when timer is stopped
 
 
     # return True if all current user accept
@@ -440,8 +464,9 @@ def display_event(eid):
 
     print e.eid
     print e.uncommit_images
-
-    return render_template('event_tmpl.html', event=e)
+    msg = e.info
+    e.info = None
+    return render_template('event_tmpl.html', event=e, msg=msg)
 
 
 
