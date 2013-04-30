@@ -1,0 +1,70 @@
+{% extends "base_g.html" %}
+{% block title %} Create {% endblock %}
+{% block content %}
+<!-- Main hero unit for a primary marketing message or call to action -->
+<div class="hero-unit">
+  <h1>Upload Your Image to Event {{ event.event_name }}!</h1>
+  <p> Your image needs to be accpeted by all members of this event before
+  it is publicly available </p>
+<!-- place to upload image -->
+<div class="row">
+  <div class="span6">
+    <form class="form-inline" action="{{ url_for('upload_image') }}" 
+          method="post" enctype ="multipart/form-data" >
+      <div class="fileupload fileupload-new" data-provides="fileupload">
+        <span class="btn btn-file btn-primary btn-large">
+          <span class="fileupload-new">Select file</span>
+          <span class="fileupload-exists btn-primary">Change</span>
+          <input type="file" name="file"/></span>
+        <span class="fileupload-preview"></span>
+        <a href="#" class="close fileupload-exists" 
+           data-dismiss="fileupload" style="float: none">×</a>
+        <button type="submit" class="btn btn-primary btn-large">Upload</button>
+      </div>
+    </form>
+  </div>
+  <div class="row">
+    <div class="span">
+      <form class="form-inline" action="{{ url_for('accept') }}" 
+            method="post">
+      <button type="submit" class="btn btn-primary btn-large">Looks fine</button>
+      </form>
+    </div>
+    
+    <div class="span">
+      <form class="form-inline" action="{{ url_for('refuse') }}" 
+            method="post">
+        <button type="submit" class="btn btn-primary btn-large">Don't publish
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- display unconfirmed image -->
+<div class="row-fluid">
+  <div class = "span">
+    <h2> Unconfirmed Event Images </h2>
+  </div>
+</div> <!-- end of a row -->
+
+<!-- display unconfirmed images as a gallery -->
+  {% for images_six in event.uncommit_images | batch(6) %}
+  <div class="row-fluid">
+    {% for image in images_six %}
+    <div class="span2">      
+      <a href="../{{ image.image_path }}">
+        <img src="../{{ image.image_path }}" class="img-rounded">
+      </a>
+    </div>
+    {% endfor %}
+  </div> <!-- end of a row -->
+
+  {% endfor %}
+    
+
+
+
+  
+{% endblock %}

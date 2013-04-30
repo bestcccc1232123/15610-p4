@@ -1,0 +1,36 @@
+{% extends "base_g.html" %}
+{% block title %} Create {% endblock %}
+{% block content %}
+<!-- Main hero unit for a primary marketing message or call to action -->
+<div class="hero-unit">
+  <h1>Gallery for Events</h1>
+<!-- place to upload image -->
+</div>
+
+{% for event in events %}
+<!-- display unconfirmed image -->
+<div class="row-fluid">
+  <div class = "span">
+    <h2> Pics for Event "{{ event.event_name }}" </h2>
+  </div>
+</div> <!-- end of a row -->
+
+<!-- display unconfirmed images as a gallery -->
+  {% for images_six in event.commit_images | batch(6) %}
+  <div class="row-fluid">
+    {% for image in images_six %}
+    <div class="span2">      
+      <a href="../{{ image.image_path }}">
+        <img src="../{{ image.image_path }}" class="img-rounded">
+      </a>
+    </div>
+    {% endfor %}
+  </div> <!-- end of a row -->
+
+  {% endfor %}
+    
+
+{% endfor %}
+
+  
+{% endblock %}

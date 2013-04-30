@@ -19,15 +19,15 @@
 
 
 
-{% if not url %}
+{% if info['event_url'] %}
 <div class="span12">
-  <h3> Please use url {{ url }} </h3>
+  <b> Please use url:</b> <p>{{ info['event_url'] }}</p>
 </div>
 {% endif %}
 
-{% if not err %}
+{% if info['err_info'] %}
 <div class="span12">
-  <p> {{ err }} </p>
+  <p> <h3>Error:</h3> {{ info['err_info'] }} </p>
 </div>
 {% endif %}
 

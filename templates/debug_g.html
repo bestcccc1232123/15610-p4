@@ -1,0 +1,91 @@
+{% extends "base_g.html" %}
+{% block title %} Create {% endblock %}
+{% block content %}
+<!-- Main hero unit for a primary marketing message or call to action -->
+
+{% if events %}
+{% for event in events %}
+
+<!-- display event -->
+<div class = "span6">
+<center> <h2> Event: {{ event.event_name }} </h2> </center>
+<table class="table">
+  <tr>
+    <th> Event Name</th>
+    <th> eid </th>
+  </tr>
+  <tr>
+    <td> {{ event.event_name }} </td>
+    <td> {{ event.eid }} </td>
+  </tr>
+</table>
+</div>
+
+<!-- display user -->
+<!-- display event -->
+<div class = "span6">
+<center> <h2> </h2> Users </center>
+<table class="table">
+  <tr>
+    <th> uid</th>
+  </tr>
+
+  {% for user in event.users %}
+  <tr>
+    <td> {{ user.uid }} </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+
+<!-- display unconfirmed image -->
+<div class="row-fluid">
+  <div class = "span">
+    <h2> Unconfirmed Event Images </h2>
+  </div>
+</div> <!-- end of a row -->
+
+<!-- display unconfirmed images as a gallery -->
+  {% for images_six in event.uncommit_images | batch(6) %}
+  <div class="row-fluid">
+    {% for image in images_six %}
+    <div class="span2">      
+      <a href="../{{ image.image_path }}">
+        <img src="../{{ image.image_path }}" class="img-rounded">
+      </a>
+    </div>
+    {% endfor %}
+  </div> <!-- end of a row -->
+
+  {% endfor %}
+
+<!-- display unconfirmed image -->
+<div class="row-fluid">
+  <div class = "span">
+    <h2> confirmed Event Images </h2>
+  </div>
+</div> <!-- end of a row -->
+
+<!-- display confirmed images as a gallery -->
+  {% for images_six in event.commit_images | batch(6) %}
+  <div class="row-fluid">
+    {% for image in images_six %}
+    <div class="span2">      
+      <a href="../{{ image.image_path }}">
+        <img src="../{{ image.image_path }}" class="img-rounded">
+      </a>
+    </div>
+    {% endfor %}
+  </div> <!-- end of a row -->
+
+  {% endfor %}
+    
+
+{% endfor %}
+
+{% endif %}
+
+
+  
+{% endblock %}
