@@ -17,12 +17,6 @@ import os
 from werkzeug import secure_filename
 import time
 
-
-
-
-
-
-
 # configuration
 DATABASE = '/tmp/flaskr.db'
 DEBUG = True

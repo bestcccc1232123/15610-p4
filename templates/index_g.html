@@ -1,0 +1,37 @@
+{% extends "base_g.html" %}
+{% block title %} Create {% endblock %}
+{% block content %}
+<!-- Main hero unit for a primary marketing message or call to action -->
+<div class="hero-unit">
+  <h1>Gallery for Events!</h1>
+  <p>This is a template for a simple marketing or informational website. It includes a large callout called the hero unit and three supporting pieces of content. Use it as a starting point to create something more unique.</p>
+</div>
+
+<div class="span12">
+  <form class="form-inline" action="{{ url_for('create_event') }}" 
+        method="post">
+    <input type="text" class="span6" name="event_name"
+           placeholder="Input your event name here">
+    <button type="submit" class="btn btn-primary btn-large">Create</button>
+    </form>
+</div>
+
+
+
+
+{% if not url %}
+<div class="span12">
+  <h3> Please use url {{ url }} </h3>
+</div>
+{% endif %}
+
+{% if not err %}
+<div class="span12">
+  <p> {{ err }} </p>
+</div>
+{% endif %}
+
+
+
+
+{% endblock %}
