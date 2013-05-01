@@ -684,7 +684,7 @@ class Event_g:
                 db = get_db()
                 commit_image(db, form['iid'])
                 db.commit()
-                reset_timer()
+                self.reset_timer()
                 return True
         else:
             # the image should really be there!
