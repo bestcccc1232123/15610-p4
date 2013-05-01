@@ -28,7 +28,7 @@
 </div>
 
 <!-- display user -->
-<!-- display event -->
+
 <div class = "span6">
 <center> <h2> </h2> Users </center>
 <table class="table">
@@ -39,6 +39,26 @@
   {% for user in event.users %}
   <tr>
     <td> {{ user.uid }} </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+
+<!-- display vote state -->
+
+<div class = "span6">
+<center> <h2> </h2> vote state </center>
+<table class="table">
+  <tr>
+    <th> uid</th>
+    <th> vote </th>
+  </tr>
+
+  {% for vote_state in event.vote_states %}
+  <tr>
+    <td> {{ vote_state.uid }} </td>
+    <td> {{ vote_state.accept }}</td>
   </tr>
   {% endfor %}
 </table>

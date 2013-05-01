@@ -34,8 +34,8 @@ PASSWORD = 'default'
 LEN_RAND_ID = 32
 
 
-VOTE_INTERVAL = 3
-PATH_IMAGE = 'static/img/'
+VOTE_INTERVAL = 6000
+PATH_IMAGE = 'static/img'
 ALLOWED_EXTENSIONS = set(['txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'])
 
 SQL_SCHEMA = 'schema_g.sql'
@@ -454,7 +454,7 @@ def save_commit_image_for_event(db, eid):
     images = cur.fetchall()
     db.execute('delete from uncommit_image_g where eid = ?', [eid])
     for image in images:
-        db.execute('insert into commit_image_g (eid, uid, image_name, image_path) values (?,?,?,?,?,?)', [image['iid'], image['eid'], image['uid'], image['image_name'], image['image_path']])
+        db.execute('insert into commit_image_g (iid, eid, uid, image_name, image_path) values (?,?,?,?,?)', [image['iid'], image['eid'], image['uid'], image['image_name'], image['image_path']])
     
 
 def uncommit_image_exist(iid):
@@ -480,7 +480,7 @@ class Event_g:
         self.master = None
         self.is_commit = 0    # 0 for not committed, 1 for committed
         self.slave_uid = None
-
+        self.is_refused = False
     def set_eid(eid):
         self.eid = eid
     
@@ -594,7 +594,7 @@ class Event_g:
 #        f = open(image['image_path'], 'rb')
         payload = {'iid':image['iid'], 'uid': image['uid'], 
                    'eid':image['eid']}
-        files = {'file': (image['image_path'],open(image['image_path'],'rb'))}
+        files = {'file': (image['image_name'],open(image['image_path'],'rb'))}
         
         #f.close()
         
@@ -684,6 +684,7 @@ class Event_g:
                 db = get_db()
                 commit_image(db, form['iid'])
                 db.commit()
+                reset_timer()
                 return True
         else:
             # the image should really be there!
@@ -714,6 +715,7 @@ class Event_g:
                 self.uncommit_images.remove(image)
                 db = get_db()
                 rollback_image(db, iid)
+                reset_timer()
                 db.commit()
                 return True
         else:
@@ -721,6 +723,128 @@ class Event_g:
             raise Exception
         
     
+    def send_prepare_commit(self):
+        peers_fail = []
+        payload = {'eid':self.eid}
+
+        
+        for peer in peers:
+            if peer != whoami:                
+                url = 'http://' + peer + '/commitprepare'
+                r = requests.post(url, data=payload)
+                if int(r.status_code) == 200:
+                    continue
+                elif int(r.status_code) == 201:
+                    return False
+                else:
+                    peers_fail.append(peer) # for future retry                
+
+        return True
+
+
+
+    def recv_prepare_commit(self):
+        # do nothing
+        
+        return True
+
+
+    def send_commit_commit(self, c):
+        peers_fail = []
+        for peer in peers:
+            if peer != whoami:
+                payload = {'eid':self.eid, 'commit':c}
+                # post request to other instance
+                url = 'http://'+peer + '/commitcommit'
+                r = requests.post(url, data=payload)
+                if int(r.status_code) == 200:
+                    continue
+                elif int(r.status_code) == 201:
+                    return False
+                else:
+                    peers_fail.append(peer) # for future retry                
+        
+        return True
+    
+    def recv_commit_commit(self, form):
+        print "recv_commit_commit: commit" + form['commit']
+        if int(form['commit']) == 1:
+            
+            self.clear_vote_state()
+            db = get_db()
+            self._commit_images(db)
+            save_vote_state(db, self.eid, self.vote_states)
+            db.commit()
+            self.stop_timer()
+            self.info = 'Photos have been successfully committed'
+        else: # refuse
+            if not self.does_timeout():
+                self.clear_vote_state()
+                self.uncommit_images = []
+                db = get_db()
+                save_vote_state(db, self.eid, self.vote_states)
+                delete_uncommit_images_for_event(db, self.eid)
+                db.commit()
+                self.stop_timer()
+                self.is_refused = False
+                self.info = 'One of the users refuse to commit the photos, abort'
+                
+        return True
+
+    def send_rollback_commit(self):
+        peers_fail = []
+        for peer in peers:
+            if peer != whoami:
+                payload = {'eid':image['eid']}
+                # post request to other instance
+                url = 'http://'+peer + '/rollbackcommit'
+                r = requests.post(url, data=payload)
+                if int(r.status_code) == 200:
+                    continue
+                elif int(r.status_code) == 201:
+                    return False
+                else:
+                    peers_fail.append(peer) # for future retry                
+        
+        return True
+
+
+
+    def recv_rollback_commit(self):
+        #do nothing
+        return True
+    
+        
+    def send_agree_to_master(self):
+
+        payload = {'eid': self.eid, 'uid':self.slave_uid}        
+        url = 'http://' + self.master + '/vote'
+        r = requests.post(url, data=payload)        
+        if int(r.status_code) == 200:
+            return True
+        else:
+            return False
+
+    def send_agree_to_master(self):
+
+        payload = {'eid': self.eid, 'uid':self.slave_uid,'vote':1}        
+        url = 'http://' + self.master + '/vote'
+        r = requests.post(url, data=payload)
+        
+        if int(r.status_code) == 200:
+            return True
+        else:
+            return False
+
+    def send_refuse_to_master(self):
+        payload = {'eid': self.eid, 'uid':self.slave_uid, 'vote':0}        
+        url = 'http://' + self.master + '/vote'
+        r = requests.post(url, data=payload)
+        
+        if int(r.status_code) == 200:
+            return True
+        else:
+            return False
         
     def _commit_images(self, db):
         self.commit_images = self.commit_images + self.uncommit_images
@@ -729,43 +853,62 @@ class Event_g:
 
         
     def agree(self, uid):
+        print "agree:" + "begin"
         if not self.does_timeout():
+            print "agree:" + "not timeout"
+            print "vote_states"
+            print self.vote_states
             for vote in self.vote_states:
+                print 'agree: uid = ' + uid 
                 if vote['uid'] == uid:
                     print "find vote"
                     vote['accept'] = 1
                     if self.all_accept():
-                        print "all users have accepted"
-                        self.clear_vote_state()
-                        db = get_db()
-                        self._commit_images(db)
-                        save_vote_state(db, self.eid, self.vote_states)
-                        db.commit()
-                        self.stop_timer()
-                        self.info = 'Photos have been successfully committed'
+             
+                        # if this is a slave_instance, send aggregate 
+                        # agree to master
+                        if self.slave_uid is not None:
+                            print "agree:" + 'prepare to send agree to master'
+                            if self.send_agree_to_master():
+                                return
+                            else:
+                                # communication broken, should abort?
+                                raise Exception
+                        
+                        else:
+                            pass
+                            # two phase commit to commit the images
                     else:
                         db = get_db()
                         update_vote_state(db, self.eid, uid, 1)
                         db.commit()
-                break
+                        break
             #else:
             #   raise exception no such user
         
     def refuse(self, uid):
+
+        print "refuse:" + "begin"
         if not self.does_timeout():
-            self.clear_vote_state()
-            self.uncommit_images = []
-            db = get_db()
-            save_vote_state(db, self.eid, self.vote_states)
-            delete_uncommit_images_for_event(db, self.eid)
-            db.commit()
-            self.stop_timer()
-            self.info = 'One of the users refuse to commit the photos, abort'
-            
+            if self.slave_uid is not None:
+                print "refuse:" + 'prepare to send fuse to master'
+                if self.send_refuse_to_master():
+                    return
+                else:
+                    # communication broken, should abort?
+                    raise Exception
+                        
+       
+            else:
+                self.is_refused = True
+                return                
+                
+            #else:
+            #   raise exception no such user            
             
     def does_timeout(self):
         time_now = time.time()
-        if self.time_start > 0 and time_now - self.time_start  > VOTE_INTERVAL:
+        if self.time_start > 0 and time_now - self.time_start > VOTE_INTERVAL:
             self.info = 'Timeout, abort'
             self.clear_vote_state()
             self.uncommit_images = []
@@ -773,8 +916,10 @@ class Event_g:
             save_vote_state(db, self.eid, self.vote_states)
             delete_uncommit_images_for_event(db, self.eid)
             db.commit()
+            print "does Timeout: return True"
             return True
         else:
+            print "does_timeout: return False, time_start:" + str(self.time_start) + 'time_now:' + str(time_now)
             return False
     
     def reset_timer(self):
@@ -788,13 +933,61 @@ class Event_g:
     def all_accept(self):
         for vote in self.vote_states:
             if vote['accept'] != 1:
-                print "return False"
                 return False
         else:
-            print "return True"
             return True
 
+    def check_commit(self):
+        
+        if self.slave_uid is None and self.all_accept():
+            print "check_commit: prepare to commit commit"
+            if self.send_prepare_commit():
+                # all instances successfully returns
+                if self.send_commit_commit(1):
+                    print "all users have accepted"
+                    self.clear_vote_state()
+                    db = get_db()
+                    self._commit_images(db)
+                    save_vote_state(db, self.eid, self.vote_states)
+                    db.commit()
+                    self.stop_timer()
+                    self.info = 'Photos have been successfully committed'
+                    
+                else:
+                    # should repeat the commit packet
+                    raise Exception
+            else:
+                if self.send_rollback_commit():
+                    
+                    pass
+                else:
+                    raise Exception
+        elif self.slave_uid is None and self.is_refused is True:
+            print "check commit: prepare to refuse"
+            if self.send_prepare_commit():
+                # all instances successfully returns
+                if self.send_commit_commit(0):
+                    self.clear_vote_state()
+                    self.uncommit_images = []
+                    db = get_db()
+                    save_vote_state(db, self.eid, self.vote_states)
+                    delete_uncommit_images_for_event(db, self.eid)
+                    db.commit()
+                    self.is_refused = False
+                    self.stop_timer()
+                    self.info = 'One of the users refuse to commit the photos, abort'                    
+                else:
+                    # should repeat the commit packet
+                    raise Exception
+            else:
+                if self.send_rollback_commit():
+                    
+                    pass
+                else:
+                    raise Exception
 
+
+                            
 
 #global variable
 evt_mgr = EventManager_g()
@@ -845,9 +1038,10 @@ def display_event(eid):
     else:
         # returned user
         pass
-
+    
     print e.eid
     print e.uncommit_images
+    e.check_commit()
     msg = e.info
     e.info = None
     return render_template('event_tmpl.html', event=e, msg=msg)
@@ -882,7 +1076,20 @@ def accept():
     if request.method == 'POST':
         e = evt_mgr.get_event_from_eid(session['eid'])
         e.agree(session['uid_g'])
+        print "/accept: prepare to check_commit"
+        e.check_commit()
     return redirect(url_for('display_event', eid = session['eid']))
+
+@app.route('/vote',methods=['POST'])
+def handle_vote():
+    if request.method == 'POST':
+        print "handle_vote:" + request.form['uid'] + 'vote: '+ request.form['vote']
+        e = evt_mgr.get_event_from_eid(request.form['eid'])
+        if int(request.form['vote']) == 1:
+            e.agree(request.form['uid'])
+        else:
+            e.refuse(request.form['uid'])
+    return '',200
 
 @app.route('/refuse', methods=['POST'])
 def refuse():
@@ -974,13 +1181,45 @@ def handle_commit_image():
               
 @app.route('/imagerollback', methods=['POST'])
 def handle_rollback_image():
-    e = evt_mgr.get_event_from_eid(request.form['iid'])
+    e = evt_mgr.get_event_from_eid(request.form['eid'])
     if e is None:
         raise Exception
     else:
         e.recv_rollback_image(request.form)
         return '', 200
         
+
+@app.route('/commitprepare', methods = ['POST'])
+def handle_prepare_commit():
+    e = evt_mgr.get_event_from_eid(request.form['eid'])
+    print "handle_prepare_commit eid:" + request.form['eid'] 
+    if e is None:
+        raise Exception
+    else:
+        e.recv_prepare_commit()
+        return '', 200
+
+@app.route('/commitcommit', methods=['POST'])
+def handle_commit_commit():
+    e = evt_mgr.get_event_from_eid(request.form['eid'])
+    print "handle_commit_commit eid:" + request.form['eid'] 
+    print e.uncommit_images
+    if e is None:
+        raise Exception
+    else:
+        e.recv_commit_commit(request.form)
+        return '', 200
+    
+              
+@app.route('/commitrollback', methods=['POST'])
+def handle_rollback_commit():
+    e = evt_mgr.get_event_from_eid(request.form['eid'])
+    if e is None:
+        raise Exception
+    else:
+        e.recv_rollback_commit(request.form)
+        return '', 200
+
 
 def self_config():
     # first parameter helps choose ip:port
@@ -991,7 +1230,7 @@ def self_config():
     evt_mgr.port = int(my_port)
     # make sure different instances of apps using different database
     app.config['DATABASE'] = app.config['DATABASE'] + sys.argv[1]
-
+    app.config['PATH_IMAGE'] = app.config['PATH_IMAGE'] + sys.argv[1]
 
 if __name__ == '__main__':
     self_config()    
