@@ -3,10 +3,23 @@
     Flaskg
     ~~~~~~
 
-    for 15610 project 4
+    For 15610 project 4
     
-    by app.run() it is single threaded, no need to worry about locks
+    1. By app.run() it is single threaded, no need to worry about locks    
+    2. For simplicity, we use lazy timer, i.e., we verify that timeout doesn't happen when timeout will make a difference (for example, causing an abort)
+    3. When does two phase commit, any failed query will be resent. We use timeout provided by "requests" module to avoid using a timer of our own
+    4. States are backup by database
+    5. DANGER: extremely naive python code ahead... ^ ^
     
+    Our basic two phase commit protocol is:
+    1. CO(coordinate)->CHs(cohort): prepare
+    2. CHs->CO: ack
+    3. If all CHs acked yes(200 OK):
+        CO->CHs:commit
+       If one of CHs acked no(201):
+        CO->CHs:rollback
+    
+
     :copyright: (c) 2013 by Chen Chen.
     :license: BSD, see LICENSE for more details.
 """
@@ -32,16 +45,13 @@ USERNAME = 'admin'
 PASSWORD = 'default'
 
 LEN_RAND_ID = 32
+SEND_TIMEOUT = 3 # time out for sending requests
 
-
-VOTE_INTERVAL = 6000
+VOTE_INTERVAL = 600
 PATH_IMAGE = 'static/img'
 ALLOWED_EXTENSIONS = set(['txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'])
 
 SQL_SCHEMA = 'schema_g.sql'
-
-
-
 
 
 
@@ -203,7 +213,7 @@ def load_vote_states_for_event(eid):
 def restore_event(event_db):
     e = Event_g(event_db['event_name'])
     e.eid = event_db['eid']
-    e.event_name = event_db['eid']
+    e.event_name = event_db['event_name']
     e.master = event_db['eid']
     e.is_commit = event_db['eid']
 
@@ -217,6 +227,18 @@ def restore_event(event_db):
 
 def get_random_id():
     return base64.urlsafe_b64encode(os.urandom(LEN_RAND_ID))
+
+
+def post_data(url, form, files=None):    
+    try:
+        if files is None:
+            r = requests.post(url, data=form, timeout=SEND_TIMEOUT)
+        else:
+            r = requests.post(url, data=form, files=files, timeout=SEND_TIMEOUT)
+    except Exception:
+        r = None
+    
+    return r
 
 
 class Error_g(Exception):
@@ -287,26 +309,23 @@ class EventManager_g:
                
         if self.send_prepare_event(e):
             # all instances successfully returns
-            if self.send_commit_event(e):
-                e.is_commit = 1;
-                db = get_db()
-                commit_event(db,e)
-                db.commit()
-                
-            else:
-                # should repeat the commit packet
-                raise Exception
+            self.send_commit_event(e)
+            e.is_commit = 1;
+            db = get_db()
+            commit_event(db,e)
+            db.commit()
+                                                    
         else:
-            if self.send_rollback_event(e):
-                db = get_db()
-                rollback_event(db, e)
-                db.commit()
-            else:
-                raise Exception
-            
+            self.send_rollback_event(e)
+            db = get_db()
+            rollback_event(db, e)
+            db.commit()
+                                        
         return e    
 
     
+   
+
     # ===================================
     # functions for tpc to setup events
     # ==================================
@@ -321,13 +340,36 @@ class EventManager_g:
                        'master':str(event.master)}
                 url = 'http://'+peer + '/eventprepare'
                 print 'connect '+url
-                r = requests.post(url, data=payload)
-                if int(r.status_code) == 200:
+                r = post_data(url, payload, None)
+                if r is None:
+                    peers_fail.append(peer) # for future retry                
+                elif int(r.status_code) == 200:
                     continue
                 elif int(r.status_code) == 201:
                     return False
                 else:
-                    peers_fail.append(peer) # for future retry                
+                    # should not return this ret code, we will retry
+                    peers_fail.append(peer)          
+                    
+        
+        # retry all the failed connection
+        for peer in peers_fail:
+
+            # post request to other instance
+            payload = {'eid': str(event.eid), 
+                       'event_name':str(event.event_name),
+                       'master':str(event.master)}
+            url = 'http://'+peer + '/eventprepare'
+            print 'connect '+url
+            r = post_data(url, payload, None)
+            if r is None:
+                return False
+            elif int(r.status_code) == 200:
+                continue
+            elif int(r.status_code) == 201:
+                return False
+            else:                
+                return False
         
         return True
 
@@ -359,14 +401,30 @@ class EventManager_g:
                 payload = {'eid':e.eid}
                 # post request to other instance
                 url = 'http://'+peer + '/eventcommit'
-                r = requests.post(url, data=payload)
-                if int(r.status_code) == 200:
+                r = post_data(url, payload, None)
+                if r is None:
+                    peers_fail.append(peer)
+                elif int(r.status_code) == 200:
                     continue
                 elif int(r.status_code) == 201:
                     return False
                 else:
                     peers_fail.append(peer) # for future retry                
         
+        for peer in peers_fail:
+            payload = {'eid':e.eid}
+            # post request to other instance
+            url = 'http://'+peer + '/eventcommit'
+            r = post_data(url, payload, None)
+            if r is None:
+                return False
+            elif int(r.status_code) == 200:
+                continue
+            elif int(r.status_code) == 201:
+                return False
+            else:
+                return False
+            
         return True
         
 
@@ -377,48 +435,63 @@ class EventManager_g:
             # definitely something wrong
             return False                
         else:
-            e.is_commit = 1
-            # change the event to be commited 
-            db = get_db()
-            commit_event(db, e)
-            db.commit()
+            # only commit those uncommitted event, in case 
+            # repeated connection happens
+            if e.is_commit != 1:
+                e.is_commit = 1
+                # change the event to be commited 
+                db = get_db()
+                commit_event(db, e)
+                db.commit()
             return True
 
 
-    def send_rollback_event(self):
+    def send_rollback_event(self, e):
         peers_fail = []
         for peer in peers:
             if peer != self.url:
                 payload = {'eid':e.eid}
                 # post request to other instance
                 url = 'http://'+peer + '/eventrollback'
-                r = requests.post(url, data=payload)
-                if int(r.status_code) == 200:
+                r = post_data(url, payload, None)
+                if r is None:
+                    peers_fail.append(peer)
+                elif int(r.status_code) == 200:
                     continue
                 elif int(r.status_code) == 201:
                     return False
                 else:
                     peers_fail.append(peer) # for future retry                
         
+        for peer in peers_fail:
+            payload = {'eid':e.eid}
+            # post request to other instance
+            url = 'http://'+peer + '/eventrollback'
+            r = post_data(url, payload, None)
+            if r is None:
+                return False
+            elif int(r.status_code) == 200:
+                continue
+            elif int(r.status_code) == 201:
+                return False
+            else:
+                return False
+
         return True
 
     
     def recv_rollback_event(self, form):
         e = self.get_event_from_eid(form['eid'])
         if e is None:
-            # definitely something wrong
-            return False                
-        else:
+            # repeated rollback commit, directly return
+            return True                
+        else:            
             self.events.remove(e)
             # change the event to be commited 
             db = get_db()            
             rollback_event(db, e)
             db.commit()
             return True
-
-
-
-
 
 def save_new_user(db, eid, uid):
     
@@ -528,9 +601,12 @@ class Event_g:
         payload = {'eid': self.eid, 'uid': self.slave_uid}
                 
         url = 'http://' + self.master + '/newuser'
-        r = requests.post(url, data=payload)
-        
-        if int(r.status_code) == 200:
+        r = post_data(url, payload, None)
+        if r is None:
+            # master instance down, do nothing
+            # wait timeout
+            return True
+        elif int(r.status_code) == 200:
             return True
         else:
             return False
@@ -550,6 +626,7 @@ class Event_g:
     
 
     def add_new_image(self, uid, image_name, image_path):
+        
         image = dict()
         image['uid'] = uid
         image['eid'] = self.eid
@@ -566,23 +643,19 @@ class Event_g:
         
         if self.send_prepare_image(image):
             # all instances successfully returns
-            if self.send_commit_image(image):
-                image['is_commit'] = 1;
-                db = get_db()
-                commit_image(db,image['iid'])
-                db.commit()
-                print self.uncommit_images
-            else:
-                # should repeat the commit packet
-                raise Exception
-        else:
-            if self.send_rollback_image(image):
-                db = get_db()
-                rollback_image(db, image['iid'])
-                db.commit()
-            else:
-                raise Exception
+            self.send_commit_image(image)
+            image['is_commit'] = 1;
+            db = get_db()
+            commit_image(db,image['iid'])
+            db.commit()
+            print self.uncommit_images
 
+        else:
+            self.send_rollback_image(image)
+            db = get_db()
+            rollback_image(db, image['iid'])
+            db.commit()
+            
         
         self.reset_timer()
 
@@ -590,25 +663,35 @@ class Event_g:
     def send_prepare_image(self,image):
         
         peers_fail = []
-#        f = codecs.open(image['image_path'], encoding='utf-8')
-#        f = open(image['image_path'], 'rb')
+
         payload = {'iid':image['iid'], 'uid': image['uid'], 
                    'eid':image['eid']}
         files = {'file': (image['image_name'],open(image['image_path'],'rb'))}
-        
-        #f.close()
-        
+                
         for peer in peers:
             if peer != whoami:                
                 url = 'http://' + peer + '/imageprepare'
-                r = requests.post(url, data=payload, files=files)
-                print r.text
-                if int(r.status_code) == 200:
+                r = post_data(url, payload, files)
+                if r is None:
+                    peers_fail.append(peer)
+                elif int(r.status_code) == 200:
                     continue
                 elif int(r.status_code) == 201:
                     return False
                 else:
                     peers_fail.append(peer) # for future retry                
+
+        for peer in peers_fail:
+            url = 'http://' + peer + '/imageprepare'
+            r = post_data(url, payload, files)
+            if r is None:
+                return False
+            elif int(r.status_code) == 200:
+                continue
+            elif int(r.status_code) == 201:
+                return False
+            else:
+                return False
 
         return True
 
@@ -616,6 +699,8 @@ class Event_g:
         
         form = request.form
         if uncommit_image_exist(form['iid']):
+            # repeated prepare query
+            # ignore it
             return True
         else:            
             print "receive new image:" + form['iid']
@@ -637,10 +722,8 @@ class Event_g:
 
             image['image_path'] = pathname
             image['image_name'] = filename
-
             image['is_commit'] = 0
-            
-            
+                        
             self.uncommit_images.append(image)
             
             print self.uncommit_images
@@ -663,13 +746,29 @@ class Event_g:
                 payload = {'eid':image['eid'],'iid':image['iid']}
                 # post request to other instance
                 url = 'http://'+peer + '/imagecommit'
-                r = requests.post(url, data=payload)
-                if int(r.status_code) == 200:
+                r = post_data(url, payload)
+                if r is None:
+                    peers_fail.append(peer)
+                elif int(r.status_code) == 200:
                     continue
                 elif int(r.status_code) == 201:
                     return False
                 else:
                     peers_fail.append(peer) # for future retry                
+        
+        for peer in peers_fail:
+            payload = {'eid':image['eid'],'iid':image['iid']}
+        
+            url = 'http://'+peer + '/imagecommit'
+            r = post_data(url, payload)
+            if r is None:
+                return False
+            elif int(r.status_code) == 200:
+                continue
+            elif int(r.status_code) == 201:
+                return False
+            else:
+                return False
         
         return True
 
@@ -679,16 +778,16 @@ class Event_g:
         
         for image in self.uncommit_images:
             print image['iid']
-            if image['iid'] == form['iid']:
-                image['is_commit'] = 1
-                db = get_db()
-                commit_image(db, form['iid'])
-                db.commit()
-                self.reset_timer()
-                return True
+            if image['iid'] == form['iid'] and image['is_commit'] != 1:
+                    image['is_commit'] = 1
+                    db = get_db()
+                    commit_image(db, form['iid'])
+                    db.commit()
+                    self.reset_timer()
+                    return True
         else:
-            # the image should really be there!
-            raise Exception
+            return True # for repeated commit query
+
     
 
     def send_rollback_image(self, image):
@@ -698,19 +797,35 @@ class Event_g:
                 payload = {'eid':image['eid'],'iid':image['iid']}
                 # post request to other instance
                 url = 'http://'+peer + '/imagerollback'
-                r = requests.post(url, data=payload)
-                if int(r.status_code) == 200:
+                r = post_data(url, payload, None)
+                if r is None:
+                    peers_fail.append(peer)
+                elif int(r.status_code) == 200:
                     continue
                 elif int(r.status_code) == 201:
                     return False
                 else:
                     peers_fail.append(peer) # for future retry                
         
+        for peer in peers_fail:
+            payload = {'eid':image['eid'],'iid':image['iid']}
+            # post request to other instance
+            url = 'http://'+peer + '/imagerollback'
+            r = post_data(url, payload, None)
+            if r is None:
+                return False
+            elif int(r.status_code) == 200:
+                continue
+            elif int(r.status_code) == 201:
+                return False
+            else:
+                return False
+
         return True
      
     def recv_rollback_image(self, form):
         for image in self.uncommit_images:
-            if image['iid'] == form['iid']:
+            if image['iid'] == form['iid'] and image['is_commit'] != 1:
                 image['is_commit'] = 0
                 self.uncommit_images.remove(image)
                 db = get_db()
@@ -719,25 +834,37 @@ class Event_g:
                 db.commit()
                 return True
         else:
-            # the image should really be there!
-            raise Exception
+            # handle repeated rollback query
+            return True
         
     
     def send_prepare_commit(self):
         peers_fail = []
         payload = {'eid':self.eid}
-
         
         for peer in peers:
             if peer != whoami:                
                 url = 'http://' + peer + '/commitprepare'
-                r = requests.post(url, data=payload)
-                if int(r.status_code) == 200:
+                r = post_data(url, payload)
+                if r is None:
+                    peers_fail.append(peer)
+                elif int(r.status_code) == 200:
                     continue
                 elif int(r.status_code) == 201:
                     return False
                 else:
                     peers_fail.append(peer) # for future retry                
+        for peer in peers_fail:
+            url = 'http://' + peer + '/commitprepare'
+            r = post_data(url, payload)
+            if r is None:
+                return False
+            elif int(r.status_code) == 200:
+                continue
+            elif int(r.status_code) == 201:
+                return False
+            else:
+                return False
 
         return True
 
@@ -756,27 +883,53 @@ class Event_g:
                 payload = {'eid':self.eid, 'commit':c}
                 # post request to other instance
                 url = 'http://'+peer + '/commitcommit'
-                r = requests.post(url, data=payload)
-                if int(r.status_code) == 200:
+                r = post_data(url, payload)
+                if r is None:
+                  peers_fail.append(peer)  
+                elif int(r.status_code) == 200:
                     continue
                 elif int(r.status_code) == 201:
                     return False
                 else:
                     peers_fail.append(peer) # for future retry                
+
+        for peer in peers_fail:
+            payload = {'eid':self.eid, 'commit':c}
+            # post request to other instance
+            url = 'http://'+peer + '/commitcommit'
+            r = post_data(url, payload)
+            if r is None:
+                return False
+            elif int(r.status_code) == 200:
+                continue
+            elif int(r.status_code) == 201:
+                return False
+            else:
+                return False
         
         return True
     
     def recv_commit_commit(self, form):
         print "recv_commit_commit: commit" + form['commit']
         if int(form['commit']) == 1:
-            
-            self.clear_vote_state()
-            db = get_db()
-            self._commit_images(db)
-            save_vote_state(db, self.eid, self.vote_states)
-            db.commit()
-            self.stop_timer()
-            self.info = 'Photos have been successfully committed'
+            if not self.does_timeout():
+                self.clear_vote_state()
+                db = get_db()
+                self._commit_images(db)
+                save_vote_state(db, self.eid, self.vote_states)
+                db.commit()
+                self.stop_timer()
+                self.info = 'Photos have been successfully committed'
+            else:
+                self.clear_vote_state()
+                self.uncommit_images = []
+                db = get_db()
+                save_vote_state(db, self.eid, self.vote_states)
+                delete_uncommit_images_for_event(db, self.eid)
+                db.commit()
+                self.stop_timer()
+                self.info = 'Timeout, abort'
+                    
         else: # refuse
             if not self.does_timeout():
                 self.clear_vote_state()
@@ -788,24 +941,46 @@ class Event_g:
                 self.stop_timer()
                 self.is_refused = False
                 self.info = 'One of the users refuse to commit the photos, abort'
-                
+            else:
+                self.clear_vote_state()
+                self.uncommit_images = []
+                db = get_db()
+                save_vote_state(db, self.eid, self.vote_states)
+                delete_uncommit_images_for_event(db, self.eid)
+                db.commit()
+                self.stop_timer()
+                self.info = 'Timeout, abort'
         return True
 
     def send_rollback_commit(self):
         peers_fail = []
         for peer in peers:
             if peer != whoami:
-                payload = {'eid':image['eid']}
+                payload = {'eid':self.eid}
                 # post request to other instance
                 url = 'http://'+peer + '/rollbackcommit'
-                r = requests.post(url, data=payload)
-                if int(r.status_code) == 200:
+                r = post_data(url, data)
+                if r is None:
+                    peers_fail.append(peer)
+                elif int(r.status_code) == 200:
                     continue
                 elif int(r.status_code) == 201:
                     return False
                 else:
                     peers_fail.append(peer) # for future retry                
-        
+        for peer in peers_fail:
+            payload = {'eid':image['eid']}
+            # post request to other instance
+            url = 'http://'+peer + '/rollbackcommit'
+            r = post_data(url, data)
+            if r is None:
+                return False
+            elif int(r.status_code) == 200:
+                continue
+            elif int(r.status_code) == 201:
+                return False
+            else:
+                return False
         return True
 
 
@@ -819,8 +994,10 @@ class Event_g:
 
         payload = {'eid': self.eid, 'uid':self.slave_uid}        
         url = 'http://' + self.master + '/vote'
-        r = requests.post(url, data=payload)        
-        if int(r.status_code) == 200:
+        r = post_data(url, payload)        
+        if r is None:
+            return True
+        elif int(r.status_code) == 200:
             return True
         else:
             return False
@@ -829,8 +1006,9 @@ class Event_g:
 
         payload = {'eid': self.eid, 'uid':self.slave_uid,'vote':1}        
         url = 'http://' + self.master + '/vote'
-        r = requests.post(url, data=payload)
-        
+        r = post_data(url, payload)
+        if r is None:
+            return True
         if int(r.status_code) == 200:
             return True
         else:
@@ -839,8 +1017,9 @@ class Event_g:
     def send_refuse_to_master(self):
         payload = {'eid': self.eid, 'uid':self.slave_uid, 'vote':0}        
         url = 'http://' + self.master + '/vote'
-        r = requests.post(url, data=payload)
-        
+        r = post_data(url, payload)
+        if r is None:
+            return True
         if int(r.status_code) == 200:
             return True
         else:
@@ -869,22 +1048,22 @@ class Event_g:
                         # agree to master
                         if self.slave_uid is not None:
                             print "agree:" + 'prepare to send agree to master'
-                            if self.send_agree_to_master():
-                                return
-                            else:
-                                # communication broken, should abort?
-                                raise Exception
+                            self.send_agree_to_master()
+                            return
+                            
+                       
+                            
                         
                         else:
-                            pass
-                            # two phase commit to commit the images
+                            return
+                    
                     else:
                         db = get_db()
                         update_vote_state(db, self.eid, uid, 1)
                         db.commit()
                         break
-            #else:
-            #   raise exception no such user
+
+
         
     def refuse(self, uid):
 
@@ -892,19 +1071,16 @@ class Event_g:
         if not self.does_timeout():
             if self.slave_uid is not None:
                 print "refuse:" + 'prepare to send fuse to master'
-                if self.send_refuse_to_master():
-                    return
-                else:
-                    # communication broken, should abort?
-                    raise Exception
+                self.send_refuse_to_master()
+                return                                                
                         
        
             else:
                 self.is_refused = True
                 return                
                 
-            #else:
-            #   raise exception no such user            
+
+
             
     def does_timeout(self):
         time_now = time.time()
@@ -943,49 +1119,37 @@ class Event_g:
             print "check_commit: prepare to commit commit"
             if self.send_prepare_commit():
                 # all instances successfully returns
-                if self.send_commit_commit(1):
-                    print "all users have accepted"
-                    self.clear_vote_state()
-                    db = get_db()
-                    self._commit_images(db)
-                    save_vote_state(db, self.eid, self.vote_states)
-                    db.commit()
-                    self.stop_timer()
-                    self.info = 'Photos have been successfully committed'
-                    
-                else:
-                    # should repeat the commit packet
-                    raise Exception
+                self.send_commit_commit(1)
+                print "all users have accepted"
+                self.clear_vote_state()
+                db = get_db()
+                self._commit_images(db)
+                save_vote_state(db, self.eid, self.vote_states)
+                db.commit()
+                self.stop_timer()
+                self.info = 'Photos have been successfully committed'
             else:
-                if self.send_rollback_commit():
-                    
-                    pass
-                else:
-                    raise Exception
+                self.send_rollback_commit()
+                
+                                                                    
         elif self.slave_uid is None and self.is_refused is True:
             print "check commit: prepare to refuse"
             if self.send_prepare_commit():
                 # all instances successfully returns
-                if self.send_commit_commit(0):
-                    self.clear_vote_state()
-                    self.uncommit_images = []
-                    db = get_db()
-                    save_vote_state(db, self.eid, self.vote_states)
-                    delete_uncommit_images_for_event(db, self.eid)
-                    db.commit()
-                    self.is_refused = False
-                    self.stop_timer()
-                    self.info = 'One of the users refuse to commit the photos, abort'                    
-                else:
-                    # should repeat the commit packet
-                    raise Exception
-            else:
-                if self.send_rollback_commit():
-                    
-                    pass
-                else:
-                    raise Exception
+                self.send_commit_commit(0)
+                self.clear_vote_state()
+                self.uncommit_images = []
+                db = get_db()
+                save_vote_state(db, self.eid, self.vote_states)
+                delete_uncommit_images_for_event(db, self.eid)
+                db.commit()
+                self.is_refused = False
+                self.stop_timer()
+                self.info = 'One of the users refuse to commit the photos, abort'                    
 
+            else:
+                self.send_rollback_commit()
+                    
 
                             
 
@@ -1020,7 +1184,7 @@ def create_event():
 def display_event(eid):
     print eid
     e = evt_mgr.get_event_from_eid(eid)
-    if e is None or e.is_commit != 1:
+    if e is None or e.is_commit != 1 and e.does_timeout():
         return redirect(url_for('create_event'))
 
     if not session.get('uid_g'):
@@ -1060,7 +1224,7 @@ def upload_image():
         
         e = evt_mgr.get_event_from_eid(session['eid'])
         file = request.files['file']
-        if file and allowed_file(file.filename):
+        if file and allowed_file(file.filename) and not e.does_timeout():
             filename = secure_filename(file.filename)
             pathname = os.path.join(app.config['PATH_IMAGE'], filename); 
             file.save(pathname)
@@ -1111,20 +1275,6 @@ def display_debug():
     events = evt_mgr.get_all_events()
     return render_template('debug_g.html', events = events)
 
-@app.route('/testrecv', methods=['POST'])
-def testrecv():
-    print 'testrecv: prepare to return 201 OK'
-    print 'request test para: ' + request.form['test']
-    return '', 201
-
-
-@app.route('/testsend', methods = ['GET'])
-def testsend():
-    print 'testsend: prepare to send request'
-    payload = {'test':'HelloWorld!'}
-    r = requests.post('http://127.0.0.1:5001/testrecv', data=payload)
-    print 'status code: '+ str(r.status_code)
-    return ''
 
 
 @app.route('/eventprepare', methods = ['POST'])
@@ -1236,7 +1386,7 @@ if __name__ == '__main__':
     self_config()    
     whoami = evt_mgr.url
     # if not debug, comment out this init_db()
-    init_db()       
+    # init_db()       
 
     app.run(host='0.0.0.0', port=evt_mgr.port)
 
